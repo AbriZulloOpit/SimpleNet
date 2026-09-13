@@ -1,7 +1,7 @@
 import os
 from enum import Enum
 
-import PIL
+from PIL import Image
 import torch
 from torchvision import transforms
 
@@ -109,11 +109,11 @@ class MVTecDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         classname, anomaly, image_path, mask_path = self.data_to_iterate[idx]
-        image = PIL.Image.open(image_path).convert("RGB")
+        image = Image.open(image_path).convert("RGB")
         image = self.transform_img(image)
 
         if self.split == DatasetSplit.TEST and mask_path is not None:
-            mask = PIL.Image.open(mask_path)
+            mask = Image.open(mask_path)
             mask = self.transform_mask(mask)
         else:
             mask = torch.zeros([1, *image.size()[1:]])

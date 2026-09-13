@@ -11,6 +11,10 @@ class _BaseMerger:
     def __init__(self):
         """Merges feature embedding by name."""
 
+    @staticmethod
+    def _reduce(features):
+        raise NotImplementedError
+
     def merge(self, features: list):
         features = [self._reduce(feature) for feature in features]
         return np.concatenate(features, axis=1)
@@ -76,7 +80,11 @@ class Aggregator(torch.nn.Module):
 class RescaleSegmentor:
     def __init__(self, device, target_size=224):
         self.device = device
-        self.target_size = target_size
+        self.target_size = (
+            (target_size, target_size)
+            if isinstance(target_size, int)
+            else tuple(target_size)
+        )
         self.smoothing = 4
 
     def convert_to_segmentation(self, patch_scores, features):
@@ -96,11 +104,21 @@ class RescaleSegmentor:
                 features = torch.from_numpy(features)
             features = features.to(self.device).permute(0, 3, 1, 2)
             if self.target_size[0] * self.target_size[1] * features.shape[0] * features.shape[1] >= 2**31:
-                subbatch_size = int((2**31-1) / (self.target_size[0] * self.target_size[1] * features.shape[1]))
+                subbatch_size = max(
+                    1,
+                    int(
+                        (2**31 - 1)
+                        / (
+                            self.target_size[0]
+                            * self.target_size[1]
+                            * features.shape[1]
+                        )
+                    ),
+                )
                 interpolated_features = []
-                for i_subbatch in range(int(features.shape[0] / subbatch_size + 1)):
-                    subfeatures = features[i_subbatch*subbatch_size:(i_subbatch+1)*subbatch_size]
-                    subfeatures = subfeatures.unsuqeeze(0) if len(subfeatures.shape) == 3 else subfeatures
+                for start in range(0, features.shape[0], subbatch_size):
+                    subfeatures = features[start : start + subbatch_size]
+                    subfeatures = subfeatures.unsqueeze(0) if len(subfeatures.shape) == 3 else subfeatures
                     subfeatures = F.interpolate(
                         subfeatures, size=self.target_size, mode="bilinear", align_corners=False
                     )

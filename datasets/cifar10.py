@@ -1,7 +1,7 @@
 import os
 from enum import Enum
 
-import PIL
+from PIL import Image
 import torch
 from torchvision import transforms
 
@@ -66,7 +66,7 @@ class Cifar10Dataset(torch.utils.data.Dataset):
         self.data_to_iterate = self.get_image_data()
         self.transform_std = IMAGENET_STD
         self.transform_mean = IMAGENET_MEAN
-        self.transform_img = [
+        transform_img = [
             transforms.Resize(resize),
             # transforms.RandomRotation(rotate_degrees, transforms.InterpolationMode.BILINEAR),
             transforms.ColorJitter(brightness_factor, contrast_factor, saturation_factor),
@@ -81,7 +81,7 @@ class Cifar10Dataset(torch.utils.data.Dataset):
             transforms.ToTensor(),
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ]
-        self.transform_img = transforms.Compose(self.transform_img)
+        self.transform_img = transforms.Compose(transform_img)
 
         self.transform_mask = [
             transforms.Resize(resize),
@@ -95,7 +95,7 @@ class Cifar10Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         img_path, classname = self.data_to_iterate[idx]
 
-        image = PIL.Image.open(img_path).convert("RGB")
+        image = Image.open(img_path).convert("RGB")
         image = self.transform_img(image)
 
         return {

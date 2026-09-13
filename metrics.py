@@ -68,7 +68,8 @@ def compute_pixelwise_retrieval_metrics(anomaly_segmentations, ground_truth_mask
         where=(precision + recall) != 0,
     )
 
-    optimal_threshold = thresholds[np.argmax(F1_scores)]
+    threshold_index = min(np.argmax(F1_scores), len(thresholds) - 1)
+    optimal_threshold = thresholds[threshold_index]
     predictions = (flat_anomaly_segmentations >= optimal_threshold).astype(int)
     fpr_optim = np.mean(predictions > flat_ground_truth_masks)
     fnr_optim = np.mean(predictions < flat_ground_truth_masks)
@@ -83,15 +84,21 @@ def compute_pixelwise_retrieval_metrics(anomaly_segmentations, ground_truth_mask
     }
 
 
-import pandas as pd
 from skimage import measure
+import pandas as pd
+
+
 def compute_pro(masks, amaps, num_th=200):
 
-    df = pd.DataFrame([], columns=["pro", "fpr", "threshold"])
-    binary_amaps = np.zeros_like(amaps, dtype=np.bool)
+    rows = []
+    binary_amaps = np.zeros_like(amaps, dtype=bool)
 
     min_th = amaps.min()
     max_th = amaps.max()
+    if np.isclose(min_th, max_th):
+        return 0.0
+    if num_th <= 0:
+        raise ValueError("num_th must be greater than zero")
     delta = (max_th - min_th) / num_th
 
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
@@ -108,14 +115,23 @@ def compute_pro(masks, amaps, num_th=200):
                 tp_pixels = binary_amap[axes0_ids, axes1_ids].sum()
                 pros.append(tp_pixels / region.area)
 
-        inverse_masks = 1 - masks
-        fp_pixels = np.logical_and(inverse_masks, binary_amaps).sum()
-        fpr = fp_pixels / inverse_masks.sum()
+        if not pros:
+            continue
 
-        df = df.append({"pro": np.mean(pros), "fpr": fpr, "threshold": th}, ignore_index=True)
+        inverse_masks = 1 - masks
+        background_pixels = inverse_masks.sum()
+        if background_pixels == 0:
+            continue
+        fp_pixels = np.logical_and(inverse_masks, binary_amaps).sum()
+        fpr = fp_pixels / background_pixels
+
+        rows.append({"pro": np.mean(pros), "fpr": fpr, "threshold": th})
 
     # Normalize FPR from 0 ~ 1 to 0 ~ 0.3
+    df = pd.DataFrame(rows, columns=["pro", "fpr", "threshold"])
     df = df[df["fpr"] < 0.3]
+    if df.empty or np.isclose(df["fpr"].max(), 0):
+        return 0.0
     df["fpr"] = df["fpr"] / df["fpr"].max()
 
     pro_auc = metrics.auc(df["fpr"], df["pro"])

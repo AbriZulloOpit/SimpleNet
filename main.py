@@ -13,7 +13,6 @@ import click
 import numpy as np
 import torch
 
-sys.path.append("src")
 import backbones
 import common
 import metrics
@@ -58,7 +57,6 @@ def run(
         results_path, log_project, log_group, run_name, mode="overwrite"
     )
 
-    pid = os.getpid()
     list_of_dataloaders = methods["get_dataloaders"](seed)
 
     device = utils.set_torch_device(gpu)
@@ -73,7 +71,7 @@ def run(
             )
         )
 
-        utils.fix_seeds(seed, device)
+        utils.fix_seeds(seed)
 
         dataset_name = dataloaders["training"].name
 
@@ -85,7 +83,7 @@ def run(
         for i, SimpleNet in enumerate(simplenet_list):
             # torch.cuda.empty_cache()
             if SimpleNet.backbone.seed is not None:
-                utils.fix_seeds(SimpleNet.backbone.seed, device)
+                utils.fix_seeds(SimpleNet.backbone.seed)
             LOGGER.info(
                 "Training models ({}/{})".format(i + 1, len(simplenet_list))
             )
@@ -93,11 +91,15 @@ def run(
 
             SimpleNet.set_model_dir(os.path.join(models_dir, f"{i}"), dataset_name)
             if not test:
-                i_auroc, p_auroc, pro_auroc = SimpleNet.train(dataloaders["training"], dataloaders["testing"])
+                i_auroc, p_auroc, pro_auroc = SimpleNet.fit(
+                    dataloaders["training"], dataloaders["testing"]
+                )
             else:
-                # BUG: the following line is not using. Set test with True by default.
-                # i_auroc, p_auroc, pro_auroc =  SimpleNet.test(dataloaders["training"], dataloaders["testing"], save_segmentation_images)
-                print("Warning: Pls set test with true by default")
+                i_auroc, p_auroc, pro_auroc = SimpleNet.test(
+                    dataloaders["training"],
+                    dataloaders["testing"],
+                    save_segmentation_images,
+                )
 
             result_collect.append(
                 {
@@ -299,27 +301,30 @@ def dataset(
             
             LOGGER.info(f"Dataset: train={len(train_dataset)} test={len(test_dataset)}")
 
+            dataloader_kwargs = {
+                "batch_size": batch_size,
+                "pin_memory": torch.cuda.is_available(),
+            }
+            if num_workers > 0:
+                dataloader_kwargs["num_workers"] = num_workers
+                dataloader_kwargs["prefetch_factor"] = 2
+
             train_dataloader = torch.utils.data.DataLoader(
                 train_dataset,
-                batch_size=batch_size,
                 shuffle=True,
-                num_workers=num_workers,
-                prefetch_factor=2,
-                pin_memory=True,
+                **dataloader_kwargs,
             )
 
             test_dataloader = torch.utils.data.DataLoader(
                 test_dataset,
-                batch_size=batch_size,
                 shuffle=False,
-                num_workers=num_workers,
-                prefetch_factor=2,
-                pin_memory=True,
+                **dataloader_kwargs,
             )
 
-            train_dataloader.name = name
-            if subdataset is not None:
-                train_dataloader.name += "_" + subdataset
+            dataloader_name = name
+            if subdataset:
+                dataloader_name += "_" + subdataset
+            train_dataloader.name = dataloader_name
 
             if train_val_split < 1:
                 val_dataset = dataset_library.__dict__[dataset_info[1]](
@@ -334,11 +339,8 @@ def dataset(
 
                 val_dataloader = torch.utils.data.DataLoader(
                     val_dataset,
-                    batch_size=batch_size,
                     shuffle=False,
-                    num_workers=num_workers,
-                    prefetch_factor=4,
-                    pin_memory=True,
+                    **dataloader_kwargs,
                 )
             else:
                 val_dataloader = None

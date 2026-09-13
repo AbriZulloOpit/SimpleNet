@@ -64,8 +64,8 @@ class Projection(torch.nn.Module):
         if out_planes is None:
             out_planes = in_planes
         self.layers = torch.nn.Sequential()
-        _in = None
-        _out = None
+        _in = in_planes
+        _out = out_planes
         for i in range(n_layers):
             _in = in_planes if i == 0 else _out
             _out = out_planes 
@@ -131,10 +131,6 @@ class SimpleNet(torch.nn.Module):
         proj_layer_type=0,
         **kwargs,
     ):
-        pid = os.getpid()
-        def show_mem():
-            return(psutil.Process(pid).memory_info())
-
         self.backbone = backbone.to(device)
         self.layers_to_extract_from = layers_to_extract_from
         self.input_shape = input_shape
@@ -174,7 +170,7 @@ class SimpleNet(torch.nn.Module):
         self.cos_lr = cos_lr
         self.train_backbone = train_backbone
         if self.train_backbone:
-            self.backbone_opt = torch.optim.AdamW(self.forward_modules["feature_aggregator"].backbone.parameters(), lr)
+            self.backbone_opt = torch.optim.AdamW(self.backbone.parameters(), lr)
         # AED
         self.aed_meta_epochs = aed_meta_epochs
 
@@ -219,7 +215,7 @@ class SimpleNet(torch.nn.Module):
             for image in data:
                 if isinstance(image, dict):
                     image = image["image"]
-                    input_image = image.to(torch.float).to(self.device)
+                input_image = image.to(torch.float).to(self.device)
                 with torch.no_grad():
                     features.append(self._embed(input_image))
             return features
@@ -288,65 +284,33 @@ class SimpleNet(torch.nn.Module):
     
     def test(self, training_data, test_data, save_segmentation_images):
 
-        ckpt_path = os.path.join(self.ckpt_dir, "models.ckpt")
+        ckpt_path = os.path.join(self.ckpt_dir, "ckpt.pth")
         if os.path.exists(ckpt_path):
             state_dicts = torch.load(ckpt_path, map_location=self.device)
-            if "pretrained_enc" in state_dicts:
-                self.feature_enc.load_state_dict(state_dicts["pretrained_enc"])
-            if "pretrained_dec" in state_dicts:
-                self.feature_dec.load_state_dict(state_dicts["pretrained_dec"])
+            if "discriminator" in state_dicts:
+                self.discriminator.load_state_dict(state_dicts["discriminator"])
+            if self.pre_proj > 0 and "pre_projection" in state_dicts:
+                self.pre_projection.load_state_dict(state_dicts["pre_projection"])
 
-        aggregator = {"scores": [], "segmentations": [], "features": []}
-        scores, segmentations, features, labels_gt, masks_gt = self.predict(test_data)
-        aggregator["scores"].append(scores)
-        aggregator["segmentations"].append(segmentations)
-        aggregator["features"].append(features)
-
-        scores = np.array(aggregator["scores"])
-        min_scores = scores.min(axis=-1).reshape(-1, 1)
-        max_scores = scores.max(axis=-1).reshape(-1, 1)
-        scores = (scores - min_scores) / (max_scores - min_scores)
-        scores = np.mean(scores, axis=0)
-
-        segmentations = np.array(aggregator["segmentations"])
-        min_scores = (
-            segmentations.reshape(len(segmentations), -1)
-            .min(axis=-1)
-            .reshape(-1, 1, 1, 1)
+        scores, segmentations, features, labels_gt, masks_gt = self._predict_dataloader(
+            test_data, ""
         )
-        max_scores = (
-            segmentations.reshape(len(segmentations), -1)
-            .max(axis=-1)
-            .reshape(-1, 1, 1, 1)
-        )
-        segmentations = (segmentations - min_scores) / (max_scores - min_scores)
-        segmentations = np.mean(segmentations, axis=0)
-
-        anomaly_labels = [
-            x[1] != "good" for x in test_data.dataset.data_to_iterate
-        ]
 
         if save_segmentation_images:
             self.save_segmentation_images(test_data, segmentations, scores)
-            
-        auroc = metrics.compute_imagewise_retrieval_metrics(
-            scores, anomaly_labels
-        )["auroc"]
 
-        # Compute PRO score & PW Auroc for all images
-        pixel_scores = metrics.compute_pixelwise_retrieval_metrics(
-            segmentations, masks_gt
+        return self._evaluate(
+            test_data, scores, segmentations, features, labels_gt, masks_gt
         )
-        full_pixel_auroc = pixel_scores["auroc"]
-
-        return auroc, full_pixel_auroc
     
     def _evaluate(self, test_data, scores, segmentations, features, labels_gt, masks_gt):
         
         scores = np.squeeze(np.array(scores))
         img_min_scores = scores.min(axis=-1)
         img_max_scores = scores.max(axis=-1)
-        scores = (scores - img_min_scores) / (img_max_scores - img_min_scores)
+        scores = (scores - img_min_scores) / np.maximum(
+            img_max_scores - img_min_scores, 1e-12
+        )
         # scores = np.mean(scores, axis=0)
 
         auroc = metrics.compute_imagewise_retrieval_metrics(
@@ -355,20 +319,12 @@ class SimpleNet(torch.nn.Module):
 
         if len(masks_gt) > 0:
             segmentations = np.array(segmentations)
-            min_scores = (
-                segmentations.reshape(len(segmentations), -1)
-                .min(axis=-1)
-                .reshape(-1, 1, 1, 1)
-            )
-            max_scores = (
-                segmentations.reshape(len(segmentations), -1)
-                .max(axis=-1)
-                .reshape(-1, 1, 1, 1)
-            )
-            norm_segmentations = np.zeros_like(segmentations)
-            for min_score, max_score in zip(min_scores, max_scores):
-                norm_segmentations += (segmentations - min_score) / max(max_score - min_score, 1e-2)
-            norm_segmentations = norm_segmentations / len(scores)
+            min_scores = segmentations.reshape(len(segmentations), -1).min(axis=-1)
+            max_scores = segmentations.reshape(len(segmentations), -1).max(axis=-1)
+            denominator = np.maximum(max_scores - min_scores, 1e-2)
+            norm_segmentations = (
+                segmentations - min_scores[:, None, None]
+            ) / denominator[:, None, None]
 
 
             # Compute PRO score & PW Auroc for all images
@@ -386,7 +342,9 @@ class SimpleNet(torch.nn.Module):
         return auroc, full_pixel_auroc, pro
         
     
-    def train(self, training_data, test_data):
+    def fit(self, training_data, test_data):
+        if self.logger is None:
+            raise RuntimeError("set_model_dir must be called before fit")
 
         
         state_dict = {}
@@ -401,7 +359,9 @@ class SimpleNet(torch.nn.Module):
                 self.load_state_dict(state_dict, strict=False)
 
             self.predict(training_data, "train_")
-            scores, segmentations, features, labels_gt, masks_gt = self.predict(test_data)
+            scores, segmentations, features, labels_gt, masks_gt = self._predict_dataloader(
+                test_data, ""
+            )
             auroc, full_pixel_auroc, anomaly_pixel_auroc = self._evaluate(test_data, scores, segmentations, features, labels_gt, masks_gt)
             
             return auroc, full_pixel_auroc, anomaly_pixel_auroc
@@ -422,7 +382,9 @@ class SimpleNet(torch.nn.Module):
             self._train_discriminator(training_data)
 
             # torch.cuda.empty_cache()
-            scores, segmentations, features, labels_gt, masks_gt = self.predict(test_data)
+            scores, segmentations, features, labels_gt, masks_gt = self._predict_dataloader(
+                test_data, ""
+            )
             auroc, full_pixel_auroc, pro = self._evaluate(test_data, scores, segmentations, features, labels_gt, masks_gt)
             self.logger.logger.add_scalar("i-auroc", auroc, i_mepoch)
             self.logger.logger.add_scalar("p-auroc", full_pixel_auroc, i_mepoch)
@@ -454,6 +416,8 @@ class SimpleNet(torch.nn.Module):
 
     def _train_discriminator(self, input_data):
         """Computes and sets the support features for SPADE."""
+        if self.logger is None:
+            raise RuntimeError("set_model_dir must be called before training")
         _ = self.forward_modules.eval()
         
         if self.pre_proj > 0:
@@ -545,7 +509,7 @@ class SimpleNet(torch.nn.Module):
             return self._predict_dataloader(data, prefix)
         return self._predict(data)
 
-    def _predict_dataloader(self, dataloader, prefix):
+    def _predict_dataloader(self, dataloader, prefix) -> tuple:
         """This function provides anomaly scores/maps for full dataloaders."""
         _ = self.forward_modules.eval()
 
@@ -560,20 +524,22 @@ class SimpleNet(torch.nn.Module):
 
         with tqdm.tqdm(dataloader, desc="Inferring...", leave=False) as data_iterator:
             for data in data_iterator:
-                if isinstance(data, dict):
-                    labels_gt.extend(data["is_anomaly"].numpy().tolist())
-                    if data.get("mask", None) is not None:
-                        masks_gt.extend(data["mask"].numpy().tolist())
-                    image = data["image"]
-                    img_paths.extend(data['image_path'])
+                if not isinstance(data, dict):
+                    raise TypeError("SimpleNet dataloaders must yield dictionaries")
+                labels_gt.extend(data["is_anomaly"].numpy().tolist())
+                if data.get("mask", None) is not None:
+                    masks_gt.extend(data["mask"].numpy().tolist())
+                image = data["image"]
+                img_paths.extend(data["image_path"])
                 _scores, _masks, _feats = self._predict(image)
                 for score, mask, feat, is_anomaly in zip(_scores, _masks, _feats, data["is_anomaly"].numpy().tolist()):
                     scores.append(score)
                     masks.append(mask)
+                    features.append(feat)
 
         return scores, masks, features, labels_gt, masks_gt
 
-    def _predict(self, images):
+    def _predict(self, images) -> tuple:
         """Infer score and mask for a batch of images."""
         images = images.to(torch.float).to(self.device)
         _ = self.forward_modules.eval()
@@ -617,8 +583,8 @@ class SimpleNet(torch.nn.Module):
 
     def save_to_path(self, save_path: str, prepend: str = ""):
         LOGGER.info("Saving data.")
-        self.anomaly_scorer.save(
-            save_path, save_features_separately=False, prepend=prepend
+        raise NotImplementedError(
+            "save_to_path is not supported because SimpleNet has no anomaly scorer"
         )
         params = {
             "backbone.name": self.backbone.name,
@@ -674,7 +640,7 @@ class SimpleNet(torch.nn.Module):
 class PatchMaker:
     def __init__(self, patchsize, top_k=0, stride=None):
         self.patchsize = patchsize
-        self.stride = stride
+        self.stride = stride if stride is not None else 1
         self.top_k = top_k
 
     def patchify(self, features, return_spatial_info=False):

@@ -5,7 +5,7 @@ import random
 
 import matplotlib.pyplot as plt
 import numpy as np
-import PIL
+from PIL import Image
 import torch
 import tqdm
 
@@ -47,14 +47,15 @@ def plot_segmentation_images(
         desc="Generating Segmentation Images...",
         leave=False,
     ):
-        image = PIL.Image.open(image_path).convert("RGB")
+        image = Image.open(image_path).convert("RGB")
         image = image_transform(image)
         if not isinstance(image, np.ndarray):
             image = image.numpy()
 
+        mask = np.zeros_like(image)
         if masks_provided:
             if mask_path is not None:
-                mask = PIL.Image.open(mask_path).convert("RGB")
+                mask = Image.open(mask_path).convert("RGB")
                 mask = mask_transform(mask)
                 if not isinstance(mask, np.ndarray):
                     mask = mask.numpy()
@@ -64,11 +65,18 @@ def plot_segmentation_images(
         savename = image_path.split("/")
         savename = "_".join(savename[-save_depth:])
         savename = os.path.join(savefolder, savename)
-        f, axes = plt.subplots(1, 2 + int(masks_provided))
+        f, axes = plt.subplots(1, 2 if masks_provided else 1)
+        axes = np.atleast_1d(axes)
         axes[0].imshow(image.transpose(1, 2, 0))
-        axes[1].imshow(mask.transpose(1, 2, 0))
-        axes[2].imshow(segmentation)
-        f.set_size_inches(3 * (2 + int(masks_provided)), 3)
+        if masks_provided:
+            axes[1].imshow(mask.transpose(1, 2, 0))
+            axes[1].set_title("Mask")
+        else:
+            axes[0].set_title("Image")
+        segmentation_axis = axes[-1]
+        segmentation_axis.imshow(segmentation)
+        segmentation_axis.set_title("Segmentation")
+        f.set_size_inches(3 * len(axes), 3)
         f.tight_layout()
         f.savefig(savename)
         plt.close()
@@ -99,10 +107,10 @@ def set_torch_device(gpu_ids):
     Args:
         gpu_ids: [list] list of gpu ids. If empty, cpu is used.
     """
-    if len(gpu_ids):
+    if gpu_ids and torch.cuda.is_available() and gpu_ids[0] < torch.cuda.device_count():
         # os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         # os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_ids[0])
-        return torch.device("cuda:{}".format(gpu_ids[0]))
+        return torch.device(f"cuda:{gpu_ids[0]}")
     return torch.device("cpu")
 
 
@@ -118,7 +126,7 @@ def fix_seeds(seed, with_torch=True, with_cuda=True):
     np.random.seed(seed)
     if with_torch:
         torch.manual_seed(seed)
-    if with_cuda:
+    if with_cuda and torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True

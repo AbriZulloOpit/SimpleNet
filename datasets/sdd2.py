@@ -3,7 +3,7 @@ from enum import Enum
 import pickle
 
 import cv2
-import PIL
+from PIL import Image
 import torch
 from torchvision import transforms
 
@@ -97,11 +97,11 @@ class SDD2Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         img_path, gt_path, is_anomaly = self.data_to_iterate[idx]
-        image = PIL.Image.open(img_path).convert("RGB")
+        image = Image.open(img_path).convert("RGB")
         image = self.transform_img(image)
 
         if self.split == DatasetSplit.TEST and is_anomaly:
-            mask = PIL.Image.open(gt_path)
+            mask = Image.open(gt_path)
             mask = self.transform_mask(mask)
         else:
             mask = torch.zeros([1, *image.size()[1:]])

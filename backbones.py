@@ -2,6 +2,16 @@ import timm  # noqa
 import torch
 import torchvision.models as models  # noqa
 
+
+def _torchvision_pretrained(name):
+    factory = getattr(models, name)
+    try:
+        weights_enum = models.get_model_weights(factory)
+        weights = getattr(weights_enum, "DEFAULT")
+        return factory(weights=weights)
+    except AttributeError:
+        return factory(pretrained=True)
+
 def load_ref_wrn50():
     
     import resnet 
@@ -10,14 +20,14 @@ def load_ref_wrn50():
 _BACKBONES = {
     "cait_s24_224" : "cait.cait_S24_224(True)",
     "cait_xs24": "cait.cait_XS24(True)",
-    "alexnet": "models.alexnet(pretrained=True)",
+    "alexnet": "_torchvision_pretrained('alexnet')",
     "bninception": 'pretrainedmodels.__dict__["bninception"]'
     '(pretrained="imagenet", num_classes=1000)',
-    "resnet18": "models.resnet18(pretrained=True)",
-    "resnet50": "models.resnet50(pretrained=True)",
+    "resnet18": "_torchvision_pretrained('resnet18')",
+    "resnet50": "_torchvision_pretrained('resnet50')",
     "mc3_resnet50": "load_mc3_rn50()", 
-    "resnet101": "models.resnet101(pretrained=True)",
-    "resnext101": "models.resnext101_32x8d(pretrained=True)",
+    "resnet101": "_torchvision_pretrained('resnet101')",
+    "resnext101": "_torchvision_pretrained('resnext101_32x8d')",
     "resnet200": 'timm.create_model("resnet200", pretrained=True)',
     "resnest50": 'timm.create_model("resnest50d_4s2x40d", pretrained=True)',
     "resnetv2_50_bit": 'timm.create_model("resnetv2_50x3_bitm", pretrained=True)',
@@ -28,12 +38,12 @@ _BACKBONES = {
     "resnetv2_152_21k": 'timm.create_model("resnetv2_152x4_bitm_in21k", pretrained=True)',
     "resnetv2_152_384": 'timm.create_model("resnetv2_152x2_bit_teacher_384", pretrained=True)',
     "resnetv2_101": 'timm.create_model("resnetv2_101", pretrained=True)',
-    "vgg11": "models.vgg11(pretrained=True)",
-    "vgg19": "models.vgg19(pretrained=True)",
-    "vgg19_bn": "models.vgg19_bn(pretrained=True)",
-    "wideresnet50": "models.wide_resnet50_2(pretrained=True)",
+    "vgg11": "_torchvision_pretrained('vgg11')",
+    "vgg19": "_torchvision_pretrained('vgg19')",
+    "vgg19_bn": "_torchvision_pretrained('vgg19_bn')",
+    "wideresnet50": "_torchvision_pretrained('wide_resnet50_2')",
     "ref_wideresnet50": "load_ref_wrn50()",
-    "wideresnet101": "models.wide_resnet101_2(pretrained=True)",
+    "wideresnet101": "_torchvision_pretrained('wide_resnet101_2')",
     "mnasnet_100": 'timm.create_model("mnasnet_100", pretrained=True)',
     "mnasnet_a1": 'timm.create_model("mnasnet_a1", pretrained=True)',
     "mnasnet_b1": 'timm.create_model("mnasnet_b1", pretrained=True)',
