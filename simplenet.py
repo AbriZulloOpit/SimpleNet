@@ -292,7 +292,7 @@ class SimpleNet(torch.nn.Module):
             if self.pre_proj > 0 and "pre_projection" in state_dicts:
                 self.pre_projection.load_state_dict(state_dicts["pre_projection"])
 
-        scores, segmentations, features, labels_gt, masks_gt = self._predict_dataloader(
+        scores, segmentations, labels_gt, masks_gt = self._predict_dataloader(
             test_data, ""
         )
 
@@ -300,10 +300,10 @@ class SimpleNet(torch.nn.Module):
             self.save_segmentation_images(test_data, segmentations, scores)
 
         return self._evaluate(
-            test_data, scores, segmentations, features, labels_gt, masks_gt
+            test_data, scores, segmentations, labels_gt, masks_gt
         )
     
-    def _evaluate(self, test_data, scores, segmentations, features, labels_gt, masks_gt):
+    def _evaluate(self, test_data, scores, segmentations, labels_gt, masks_gt):
         
         scores = np.squeeze(np.array(scores))
         img_min_scores = scores.min(axis=-1)
@@ -359,10 +359,10 @@ class SimpleNet(torch.nn.Module):
                 self.load_state_dict(state_dict, strict=False)
 
             self.predict(training_data, "train_")
-            scores, segmentations, features, labels_gt, masks_gt = self._predict_dataloader(
+            scores, segmentations, labels_gt, masks_gt = self._predict_dataloader(
                 test_data, ""
             )
-            auroc, full_pixel_auroc, anomaly_pixel_auroc = self._evaluate(test_data, scores, segmentations, features, labels_gt, masks_gt)
+            auroc, full_pixel_auroc, anomaly_pixel_auroc = self._evaluate(test_data, scores, segmentations, labels_gt, masks_gt)
             
             return auroc, full_pixel_auroc, anomaly_pixel_auroc
         
@@ -382,10 +382,12 @@ class SimpleNet(torch.nn.Module):
             self._train_discriminator(training_data)
 
             # torch.cuda.empty_cache()
-            scores, segmentations, features, labels_gt, masks_gt = self._predict_dataloader(
+            scores, segmentations, labels_gt, masks_gt = self._predict_dataloader(
                 test_data, ""
             )
-            auroc, full_pixel_auroc, pro = self._evaluate(test_data, scores, segmentations, features, labels_gt, masks_gt)
+            auroc, full_pixel_auroc, pro = self._evaluate(
+                test_data, scores, segmentations, labels_gt, masks_gt
+            )
             self.logger.logger.add_scalar("i-auroc", auroc, i_mepoch)
             self.logger.logger.add_scalar("p-auroc", full_pixel_auroc, i_mepoch)
             self.logger.logger.add_scalar("pro", pro, i_mepoch)
@@ -514,13 +516,10 @@ class SimpleNet(torch.nn.Module):
         _ = self.forward_modules.eval()
 
 
-        img_paths = []
         scores = []
         masks = []
-        features = []
         labels_gt = []
         masks_gt = []
-        from sklearn.manifold import TSNE
 
         with tqdm.tqdm(dataloader, desc="Inferring...", leave=False) as data_iterator:
             for data in data_iterator:
@@ -529,15 +528,12 @@ class SimpleNet(torch.nn.Module):
                 labels_gt.extend(data["is_anomaly"].numpy().tolist())
                 if data.get("mask", None) is not None:
                     masks_gt.extend(data["mask"].numpy().tolist())
-                image = data["image"]
-                img_paths.extend(data["image_path"])
-                _scores, _masks, _feats = self._predict(image)
-                for score, mask, feat, is_anomaly in zip(_scores, _masks, _feats, data["is_anomaly"].numpy().tolist()):
+                _scores, _masks, _ = self._predict(data["image"])
+                for score, mask in zip(_scores, _masks):
                     scores.append(score)
                     masks.append(mask)
-                    features.append(feat)
 
-        return scores, masks, features, labels_gt, masks_gt
+            return scores, masks, labels_gt, masks_gt
 
     def _predict(self, images) -> tuple:
         """Infer score and mask for a batch of images."""
