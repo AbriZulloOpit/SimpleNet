@@ -19,7 +19,7 @@ python3 main.py \
 	--pretrain_embed_dimension 1536 \
 	--target_embed_dimension 1536 \
 	--patchsize 3 \
-	--meta_epochs 15 \
+	--meta_epochs 5 \
 	--embedding_size 256 \
 	--gan_epochs 4 \
 	--noise_std 0.015 \
@@ -28,7 +28,7 @@ python3 main.py \
 	--dsc_margin .5 \
 	--pre_proj 1 \
 	dataset \
-	--batch_size 8 \
+	--batch_size 2 \
 	--resize 329 \
 	--imagesize 288 \
 	-d xray-garments \
