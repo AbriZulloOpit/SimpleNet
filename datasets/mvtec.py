@@ -63,10 +63,10 @@ class MVTecDataset(torch.utils.data.Dataset):
             classname: [str or None]. Name of MVTec class that should be
                        provided in this dataset. If None, the datasets
                        iterates over all available images.
-            resize: [int]. (Square) Size the loaded image initially gets
-                    resized to.
-            imagesize: [int]. (Square) Size the resized loaded image gets
-                       (center-)cropped to.
+                resize: [int]. Retained for compatibility; the loaded image is
+                    resized directly to imagesize x imagesize.
+                imagesize: [int]. Fixed square size used by the model. The full
+                       input canvas is resized without a center crop.
             split: [enum-option]. Indicates if training or test split of the
                    data should be used. Has to be an option taken from
                    DatasetSplit, e.g. mvtec.DatasetSplit.TRAIN. Note that
@@ -82,7 +82,7 @@ class MVTecDataset(torch.utils.data.Dataset):
         self.imgpaths_per_class, self.data_to_iterate = self.get_image_data()
 
         self.transform_img = [
-            transforms.Resize(resize),
+            transforms.Resize((imagesize, imagesize)),
             # transforms.RandomRotation(rotate_degrees, transforms.InterpolationMode.BILINEAR),
             transforms.ColorJitter(brightness_factor, contrast_factor, saturation_factor),
             transforms.RandomHorizontalFlip(h_flip_p),
@@ -92,15 +92,16 @@ class MVTecDataset(torch.utils.data.Dataset):
                                     translate=(translate, translate),
                                     scale=(1.0-scale, 1.0+scale),
                                     interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(imagesize),
             transforms.ToTensor(),
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ]
         self.transform_img = transforms.Compose(self.transform_img)
 
         self.transform_mask = [
-            transforms.Resize(resize),
-            transforms.CenterCrop(imagesize),
+            transforms.Resize(
+                (imagesize, imagesize),
+                interpolation=transforms.InterpolationMode.NEAREST,
+            ),
             transforms.ToTensor(),
         ]
         self.transform_mask = transforms.Compose(self.transform_mask)
