@@ -11,7 +11,7 @@ python3 main.py \
 	--log_group simplenet_xray_garments \
 	--log_project XRayGarments_Results \
 	--results_path results \
-	--run_name xray_garments_run \
+	--run_name xray_garments_dullframe_v1 \
 	net \
 	-b wideresnet50 \
 	-le layer2 \
