@@ -29,8 +29,7 @@ python3 main.py \
 	--pre_proj 1 \
 	dataset \
 	--batch_size 2 \
-	--resize 329 \
-	--imagesize 288 \
+	--imagesize 512 \
 	-d xray-garments \
 	mvtec \
 	"$datapath"
